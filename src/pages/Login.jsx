@@ -22,7 +22,7 @@ export default function Login() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      navigate('/dashboard');
+      navigate('/punch');
     } catch (err) {
       // Firebase's default error messages are reasonably user-friendly
       // (e.g. "wrong-password", "user-not-found"), so we show them directly

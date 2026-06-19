@@ -111,3 +111,20 @@ export async function recomputeAroundNow(userId, schedule) {
 
   return summary;
 }
+
+/**
+ * Fetches a user's dailySummary documents within a date range (inclusive),
+ * ordered most-recent-first. Dates are "YYYY-MM-DD" strings, matching the
+ * `date` field format computeShiftSummary produces.
+ */
+export async function getSummaryHistory(userId, startDateKey, endDateKey) {
+  const q = query(
+    collection(db, 'dailySummary'),
+    where('userId', '==', userId),
+    where('date', '>=', startDateKey),
+    where('date', '<=', endDateKey),
+    orderBy('date', 'desc')
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((d) => d.data());
+}

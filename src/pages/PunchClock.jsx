@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import { Link } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { getLatestPunch, recordPunch, recomputeAroundNow } from '../services/attendanceService';
 
@@ -85,9 +86,12 @@ export default function PunchClock() {
             Status: <strong>{isClockedIn ? 'Clocked In' : 'Clocked Out'}</strong>
           </p>
         </div>
-        <button className="link-button" onClick={() => signOut(auth)}>
-          Log out
-        </button>
+        <div className="dashboard-nav">
+          <Link to="/dashboard">View Dashboard</Link>
+          <button className="link-button" onClick={() => signOut(auth)}>
+            Log out
+          </button>
+        </div>
       </header>
 
       {error && <p className="auth-error">{error}</p>}

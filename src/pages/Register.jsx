@@ -53,7 +53,7 @@ export default function Register() {
         schedule: DEFAULT_SCHEDULE,
       });
 
-      navigate('/dashboard');
+      navigate('/punch');
     } catch (err) {
       if (createdUid) {
         // Auth account was created but the Firestore profile write failed.
