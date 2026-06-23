@@ -1,0 +1,51 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: is the requester an admin? Checks their OWN user doc's role field.
+    function isAdmin() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // users/{uid} — a user can read/write only their own profile.
+    // Admins can read/write anyone's profile (e.g. to assign schedules/roles).
+    // A self-update is only allowed if the role field is left unchanged —
+    // prevents a user from self-promoting to admin via a normal profile edit.
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId); // registration: user creates their own doc
+      allow update: if isAdmin() ||
+        (isOwner(userId) && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    // attendance/{punchId} — punches store the userId that owns them.
+    // A user can create/read their own punches. Admins can read/edit/delete any.
+    match /attendance/{punchId} {
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+      allow read: if request.auth != null &&
+        (request.auth.uid == resource.data.userId || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // dailySummary/{summaryId} — same ownership pattern as attendance.
+    // NOTE: create vs update need different checks here.
+    // On create, no existing document exists yet, so we must check the
+    // INCOMING data (request.resource), not the existing data (resource).
+    match /dailySummary/{summaryId} {
+      allow read: if request.auth != null &&
+        (request.auth.uid == resource.data.userId || isAdmin());
+      allow create: if request.auth != null &&
+        (request.auth.uid == request.resource.data.userId || isAdmin());
+      allow update: if request.auth != null &&
+        (request.auth.uid == resource.data.userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+  }
+}

@@ -6,7 +6,8 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -21,8 +22,17 @@ export default function Login() {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigate('/punch');
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+
+      // Check role to decide landing page. Falls back to /punch if the
+      // profile read fails for any reason — never block login over this.
+      try {
+        const profileSnap = await getDoc(doc(db, 'users', credential.user.uid));
+        const role = profileSnap.exists() ? profileSnap.data().role : null;
+        navigate(role === 'admin' ? '/admin' : '/punch');
+      } catch {
+        navigate('/punch');
+      }
     } catch (err) {
       // Firebase's default error messages are reasonably user-friendly
       // (e.g. "wrong-password", "user-not-found"), so we show them directly

@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { getSummaryHistory } from '../services/attendanceService';
@@ -21,9 +21,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+ const [authChecked, setAuthChecked] = useState(false);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
+      setAuthChecked(true);
     });
     return unsubscribe;
   }, []);
@@ -63,6 +66,10 @@ export default function Dashboard() {
     }),
     { regularHours: 0, overtimeHours: 0, nightDiffHours: 0, lateMinutes: 0, undertimeMinutes: 0 }
   );
+
+  if (authChecked && !user) {
+    return <Navigate to="/login" replace />;
+  }
 
   return (
     <div className="dashboard-page">

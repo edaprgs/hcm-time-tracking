@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { getLatestPunch, recordPunch, recomputeAroundNow } from '../services/attendanceService';
 
@@ -24,9 +24,12 @@ export default function PunchClock() {
   const [error, setError] = useState('');
 
   // Track auth state so we know which user's data to load.
+  const [authChecked, setAuthChecked] = useState(false);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
+      setAuthChecked(true);
     });
     return unsubscribe;
   }, []);
@@ -71,6 +74,10 @@ export default function PunchClock() {
     } finally {
       setPunchInFlight(false);
     }
+  }
+
+  if (authChecked && !user) {
+    return <Navigate to="/login" replace />;
   }
 
   if (loading) {
