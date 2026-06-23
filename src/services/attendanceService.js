@@ -3,7 +3,7 @@
  *
  * Thin data-access layer between React components and Firestore for
  * attendance-related operations. Keeping this separate from the UI means
- * PunchClock.jsx (and later, admin screens) can call these functions
+ * PunchClock.jsx, Dashboard.jsx, and admin screens can call these functions
  * without knowing Firestore query details directly.
  *
  * This is also where client-side computation gets wired in, replacing
@@ -15,6 +15,7 @@ import {
   addDoc,
   doc,
   setDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -64,14 +65,18 @@ export async function recordPunch(userId, type) {
 }
 
 /**
- * Fetches a window of punches around "now" wide enough to safely contain
- * one full shift (including overnight shifts), then recomputes and writes
- * the daily summary. Mirrors the 36-hour window logic from index.js.
+ * Fetches a window of punches centered on `centerTime` wide enough to
+ * safely contain one full shift (including overnight shifts), recomputes
+ * via computeShiftSummary, and writes the resulting dailySummary.
+ *
+ * `centerTime` defaults to "now" for the common case (just punched),
+ * but admin edits to OLDER punches must pass the punch's own timestamp
+ * here — otherwise the 36-hour window would be centered on today and
+ * miss the actual shift being edited entirely.
  */
-export async function recomputeAroundNow(userId, schedule) {
-  const now = new Date();
-  const windowStart = new Date(now.getTime() - 36 * 60 * 60 * 1000);
-  const windowEnd = new Date(now.getTime() + 36 * 60 * 60 * 1000);
+export async function recomputeAroundTime(userId, schedule, centerTime = new Date()) {
+  const windowStart = new Date(centerTime.getTime() - 36 * 60 * 60 * 1000);
+  const windowEnd = new Date(centerTime.getTime() + 36 * 60 * 60 * 1000);
 
   const q = query(
     collection(db, 'attendance'),
@@ -110,6 +115,12 @@ export async function recomputeAroundNow(userId, schedule) {
   );
 
   return summary;
+}
+
+// Thin wrapper preserving the original name/signature for existing callers
+// (PunchClock.jsx) that always recompute around the current moment.
+export async function recomputeAroundNow(userId, schedule) {
+  return recomputeAroundTime(userId, schedule);
 }
 
 /**
@@ -157,30 +168,42 @@ export async function getPunchesForUser(userId, startDate, endDate) {
 
 /**
  * ADMIN: updates a single punch's timestamp or type, then recomputes that
- * user's summary for the affected date — mirroring what the Firestore
- * trigger (index.js) would have done automatically on any punch write.
+ * user's summary for the affected date(s).
+ *
+ * `originalTimestamp` (the punch's time BEFORE this edit) is required so
+ * the recompute window correctly covers the shift being edited, even if
+ * it happened days ago — not just "today."
  */
-export async function updatePunch(punchId, updates, userId, schedule) {
+export async function updatePunch(punchId, updates, userId, schedule, originalTimestamp) {
   await setDoc(doc(db, 'attendance', punchId), updates, { merge: true });
-  await recomputeAroundNow(userId, schedule);
+
+  // Recompute centered on the punch's ORIGINAL time, not "now" — if an
+  // admin edits a 3-day-old punch, we still need the window to cover
+  // that actual shift, not today's.
+  await recomputeAroundTime(userId, schedule, originalTimestamp);
+
+  // If the edit changed the punch's date entirely (e.g. corrected a typo
+  // that moved it to a different day), also recompute centered on the
+  // NEW time, so both the old and new day's summaries end up correct.
+  if (updates.timestamp) {
+    const newTime = updates.timestamp.toDate ? updates.timestamp.toDate() : updates.timestamp;
+    await recomputeAroundTime(userId, schedule, newTime);
+  }
 }
 
 /**
- * ADMIN: deletes a punch, then recomputes. Note: recomputeAroundNow uses
- * "now" as its window center, which works for recent edits but wouldn't
- * correctly recompute a summary for a punch from many days ago — flagged
- * as a known scope limitation (see notes), since the assessment's 1-week
- * window makes this an acceptable simplification.
+ * ADMIN: deletes a punch, then recomputes centered on that punch's
+ * original time (same reasoning as updatePunch above).
  */
-export async function deletePunch(punchId, userId, schedule) {
+export async function deletePunch(punchId, userId, schedule, originalTimestamp) {
   await deleteDoc(doc(db, 'attendance', punchId));
-  await recomputeAroundNow(userId, schedule);
+  await recomputeAroundTime(userId, schedule, originalTimestamp);
 }
 
 /**
  * ADMIN: fetches all employees' dailySummary for one specific date — the
- * "daily report" view. Note this requires fetching all summaries for that
- * date across all users, which Firestore rules permit only for admins.
+ * "daily report" view. Firestore rules permit this cross-user read only
+ * for admins.
  */
 export async function getDailyReportForAllUsers(dateKey) {
   const q = query(collection(db, 'dailySummary'), where('date', '==', dateKey));
