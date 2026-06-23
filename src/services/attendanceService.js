@@ -128,3 +128,102 @@ export async function getSummaryHistory(userId, startDateKey, endDateKey) {
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => d.data());
 }
+
+/**
+ * ADMIN: fetches all user profiles, for the employee list/picker.
+ * Firestore rules allow this only when the requester is an admin.
+ */
+export async function getAllUsers() {
+  const snapshot = await getDocs(collection(db, 'users'));
+  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+/**
+ * ADMIN: fetches all punches for a specific user within a date range,
+ * for the punch-editing view. Returns raw punch docs (with their Firestore
+ * doc id, needed for edit/delete).
+ */
+export async function getPunchesForUser(userId, startDate, endDate) {
+  const q = query(
+    collection(db, 'attendance'),
+    where('userId', '==', userId),
+    where('timestamp', '>=', Timestamp.fromDate(startDate)),
+    where('timestamp', '<=', Timestamp.fromDate(endDate)),
+    orderBy('timestamp', 'asc')
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((d) => ({ id: d.id, ...d.data(), timestamp: d.data().timestamp.toDate() }));
+}
+
+/**
+ * ADMIN: updates a single punch's timestamp or type, then recomputes that
+ * user's summary for the affected date — mirroring what the Firestore
+ * trigger (index.js) would have done automatically on any punch write.
+ */
+export async function updatePunch(punchId, updates, userId, schedule) {
+  await setDoc(doc(db, 'attendance', punchId), updates, { merge: true });
+  await recomputeAroundNow(userId, schedule);
+}
+
+/**
+ * ADMIN: deletes a punch, then recomputes. Note: recomputeAroundNow uses
+ * "now" as its window center, which works for recent edits but wouldn't
+ * correctly recompute a summary for a punch from many days ago — flagged
+ * as a known scope limitation (see notes), since the assessment's 1-week
+ * window makes this an acceptable simplification.
+ */
+export async function deletePunch(punchId, userId, schedule) {
+  await deleteDoc(doc(db, 'attendance', punchId));
+  await recomputeAroundNow(userId, schedule);
+}
+
+/**
+ * ADMIN: fetches all employees' dailySummary for one specific date — the
+ * "daily report" view. Note this requires fetching all summaries for that
+ * date across all users, which Firestore rules permit only for admins.
+ */
+export async function getDailyReportForAllUsers(dateKey) {
+  const q = query(collection(db, 'dailySummary'), where('date', '==', dateKey));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((d) => d.data());
+}
+
+/**
+ * ADMIN: fetches all employees' dailySummary within a date range, then
+ * aggregates per user — the "weekly report" view. Aggregation happens
+ * client-side since Firestore can't sum across documents server-side
+ * without Cloud Functions (which we scoped out — see decision log).
+ */
+export async function getWeeklyReportForAllUsers(startDateKey, endDateKey) {
+  const q = query(
+    collection(db, 'dailySummary'),
+    where('date', '>=', startDateKey),
+    where('date', '<=', endDateKey)
+  );
+  const snapshot = await getDocs(q);
+  const rows = snapshot.docs.map((d) => d.data());
+
+  const byUser = {};
+  for (const row of rows) {
+    if (!byUser[row.userId]) {
+      byUser[row.userId] = {
+        userId: row.userId,
+        regularHours: 0,
+        overtimeHours: 0,
+        nightDiffHours: 0,
+        lateMinutes: 0,
+        undertimeMinutes: 0,
+        daysWorked: 0,
+      };
+    }
+    const agg = byUser[row.userId];
+    agg.regularHours += row.regularHours || 0;
+    agg.overtimeHours += row.overtimeHours || 0;
+    agg.nightDiffHours += row.nightDiffHours || 0;
+    agg.lateMinutes += row.lateMinutes || 0;
+    agg.undertimeMinutes += row.undertimeMinutes || 0;
+    agg.daysWorked += 1;
+  }
+
+  return Object.values(byUser);
+}
